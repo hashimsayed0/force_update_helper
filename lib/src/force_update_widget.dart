@@ -35,7 +35,11 @@ class _ForceUpdateWidgetState extends State<ForceUpdateWidget>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _checkIfAppUpdateIsNeeded();
+    // * Use post-frame callback to ensure Navigator is fully initialized
+    // * This fixes timing issues with Sentry and other wrapper packages
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkIfAppUpdateIsNeeded();
+    });
   }
 
   @override
@@ -76,6 +80,16 @@ class _ForceUpdateWidgetState extends State<ForceUpdateWidget>
   }
 
   Future<void> _triggerForceUpdate(Uri storeUrl) async {
+    // * Wait for Navigator context to be available with condition-based polling
+    // * This ensures the dialog can be shown even when Sentry or other wrappers
+    // * delay Navigator initialization
+    int attempts = 0;
+    const maxAttempts = 100; // Max 5 seconds (100 * 50ms)
+    while (widget.navigatorKey.currentContext == null && attempts < maxAttempts) {
+      await Future.delayed(const Duration(milliseconds: 50));
+      attempts++;
+    }
+
     final ctx = widget.navigatorKey.currentContext ?? context;
     // * setState not needed, just keeping track of alert visibility
     _isAlertVisible = true;
