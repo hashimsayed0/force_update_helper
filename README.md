@@ -13,9 +13,11 @@ A package for showing a force update prompt that is controlled remotely.
 
 ## Features
 
-- **Remote control**: control the force update logic remotely with a custom backend, or Firebase Remote Config, or anything that resolves to a `Future<String>`.
+- **Remote control**: control the force update logic remotely with a custom backend, Firebase Remote Config, or anything that resolves to a `Future<String>`.
+- **Flexible version checking**: compare versions by version name (semver), build number, or both with customizable priority.
+- **Multiple version formats**: accept version as combined string (`'1.8.11+154'`), separate parameters, or auto-detect from PackageInfo.
 - **UI-agnostic**: the package tells you **when** to show the update UI, you decide **how** to show it (localization is up to you).
-- **Small and opinionated**: the package is made of only two classes. Use it as is, or fork it to suit your needs.
+- **Small and opinionated**: the package is made of only three classes. Use it as is, or fork it to suit your needs.
 
 ## Getting started
 
@@ -48,11 +50,14 @@ class MainApp extends StatelessWidget {
           forceUpdateClient: ForceUpdateClient(
             // * Real apps should fetch this from an API endpoint or via
             // * Firebase Remote Config
-            fetchRequiredVersion: () => Future.value('2.0.0'),
+            // * Supports formats: '2.0.0', '154', or '2.0.0+154'
+            fetchRequiredVersion: () => Future.value('2.0.0+154'),
             // * Example ID from this app: https://fluttertips.dev/
             // * To avoid mistakes, store the ID as an environment variable and
             // * read it with String.fromEnvironment
             iosAppStoreId: '6482293361',
+            // * Optional: Specify how to compare versions (default is versionFirstThenBuild)
+            versionCheckMethod: VersionCheckMethod.versionFirstThenBuild,
           ),
           allowCancel: false,
           showForceUpdateAlert: (context, allowCancel) => showAlertDialog(
@@ -91,26 +96,161 @@ class MainApp extends StatelessWidget {
 
 Note that in order to show the update dialog, a root navigator key needs to be added to `MaterialApp` (this is the same technique used by the [upgrader](https://pub.dev/packages/upgrader) package).
 
+## Version Checking Methods
+
+The package supports four different version comparison strategies via the `VersionCheckMethod` enum:
+
+### 1. `versionFirstThenBuild` (Default)
+Compares semantic version first, then build number if versions are equal.
+
+```dart
+ForceUpdateClient(
+  fetchRequiredVersion: () => Future.value('1.8.11+154'),
+  iosAppStoreId: 'YOUR_APP_ID',
+  versionCheckMethod: VersionCheckMethod.versionFirstThenBuild,
+)
+```
+
+**Example:**
+- Current: `1.8.10+200`, Required: `1.8.11+100` → **Update required** (version is lower)
+- Current: `1.8.11+150`, Required: `1.8.11+154` → **Update required** (version equal, build is lower)
+- Current: `1.8.11+160`, Required: `1.8.11+154` → No update needed
+
+### 2. `buildFirstThenVersion`
+Compares build number first, then semantic version if build numbers are equal.
+
+```dart
+ForceUpdateClient(
+  fetchRequiredVersion: () => Future.value('1.8.11+154'),
+  iosAppStoreId: 'YOUR_APP_ID',
+  versionCheckMethod: VersionCheckMethod.buildFirstThenVersion,
+)
+```
+
+**Example:**
+- Current: `1.8.10+200`, Required: `1.8.11+154` → No update needed (build is higher)
+- Current: `1.8.10+150`, Required: `1.8.11+154` → **Update required** (build is lower)
+- Current: `1.9.0+154`, Required: `1.8.11+154` → No update needed (build equal, version is higher)
+
+### 3. `buildNumberOnly`
+Only compares build numbers, ignores version names.
+
+```dart
+ForceUpdateClient(
+  fetchRequiredVersion: () => Future.value('154'), // Just the build number
+  iosAppStoreId: 'YOUR_APP_ID',
+  versionCheckMethod: VersionCheckMethod.buildNumberOnly,
+)
+```
+
+**Example:**
+- Current: `1.8.10+150`, Required: `154` → **Update required**
+- Current: `1.8.10+160`, Required: `154` → No update needed
+
+### 4. `versionNameOnly`
+Only compares semantic versions, ignores build numbers.
+
+```dart
+ForceUpdateClient(
+  fetchRequiredVersion: () => Future.value('1.8.11'), // Just the version
+  iosAppStoreId: 'YOUR_APP_ID',
+  versionCheckMethod: VersionCheckMethod.versionNameOnly,
+)
+```
+
+**Example:**
+- Current: `1.8.10+999`, Required: `1.8.11` → **Update required**
+- Current: `1.8.12+1`, Required: `1.8.11` → No update needed
+
+## Specifying Current Version
+
+The package provides three ways to specify the current app version:
+
+### 1. Auto-detection (Default)
+By default, the package automatically reads version information from `PackageInfo`:
+
+```dart
+ForceUpdateClient(
+  fetchRequiredVersion: () => Future.value('1.8.11+154'),
+  iosAppStoreId: 'YOUR_APP_ID',
+  // currentVersion not specified - will use PackageInfo
+)
+```
+
+### 2. Combined Version String
+Pass the version as a single string in format `'version+build'`:
+
+```dart
+ForceUpdateClient(
+  fetchRequiredVersion: () => Future.value('1.8.11+154'),
+  iosAppStoreId: 'YOUR_APP_ID',
+  currentVersion: '1.8.10+150', // Explicit current version
+  versionCheckMethod: VersionCheckMethod.versionFirstThenBuild,
+)
+```
+
+### 3. Separate Parameters
+Pass version name and build number separately:
+
+```dart
+ForceUpdateClient(
+  fetchRequiredVersion: () => Future.value('1.8.11+154'),
+  iosAppStoreId: 'YOUR_APP_ID',
+  currentVersionName: '1.8.10',
+  currentBuildNumber: '150',
+  versionCheckMethod: VersionCheckMethod.versionFirstThenBuild,
+)
+```
+
+**Note:** When using `buildNumberOnly` or `versionNameOnly` methods, you only need to provide the relevant parameter:
+
+```dart
+// Build number only
+ForceUpdateClient(
+  fetchRequiredVersion: () => Future.value('154'),
+  iosAppStoreId: 'YOUR_APP_ID',
+  currentBuildNumber: '150',
+  versionCheckMethod: VersionCheckMethod.buildNumberOnly,
+)
+
+// Version name only
+ForceUpdateClient(
+  fetchRequiredVersion: () => Future.value('1.8.11'),
+  iosAppStoreId: 'YOUR_APP_ID',
+  currentVersionName: '1.8.10',
+  versionCheckMethod: VersionCheckMethod.versionNameOnly,
+)
+```
+
 ## How the package works
 
 Unlike the [upgrader](https://pub.dev/packages/upgrader) package, this package does **not** use the app store APIs to check if a newer version is available.
 
-Instead, it allows you to store the required version **remotely** (using a custom backend or Firebase Remote Config), and compare it with the current version from your `pubspec.yaml`.
+Instead, it allows you to store the required version **remotely** (using a custom backend or Firebase Remote Config), and compare it with the current version from your `pubspec.yaml` (or manually specified version).
+
+The comparison is done based on the selected `VersionCheckMethod`:
+- **Semantic versioning** is handled by the [pub_semver](https://pub.dev/packages/pub_semver) package
+- **Build numbers** are compared as integers
+- The current version is retrieved from [package_info_plus](https://pub.dev/packages/package_info_plus) unless explicitly provided
 
 Here's how you may use this in production:
 
 - Submit a new version of your app to the stores
 - Once it's approved, publish it
 - Wait for an hour or so, to account for the time it takes for the new version to be visible on all stores/countries
-- Update the `required_version` endpoint in your custom backend or via Firebase Remote Config
+- Update the `required_version` endpoint in your custom backend or via Firebase Remote Config (e.g., `'2.0.0+154'`)
 - Once users open the app, the force update logic will kick in and force them to update
 
 ## Additional details
 
-The package is made of two classes: [`ForceUpdateClient`](lib/src/force_update_client.dart) and [`ForceUpdateWidget`](lib/src/force_update_widget.dart).
+The package is made of three classes: [`ForceUpdateClient`](lib/src/force_update_client.dart), [`ForceUpdateWidget`](lib/src/force_update_widget.dart), and [`VersionCheckMethod`](lib/src/version_check_method.dart).
 
-- The `ForceUpdateClient` class fetches the required version and compares it with the [current version](https://pub.dev/documentation/package_info_plus/latest/package_info_plus/PackageInfo/version.html) from [package_info_plus](https://pub.dev/packages/package_info_plus). Versions are compared using the [pub_semver](https://pub.dev/packages/pub_semver) package.
-- The `fetchRequiredVersion` callback should fetch the required version from an API endpoint or Firebase Remote Config.
+- The `ForceUpdateClient` class fetches the required version and compares it with the current version using the specified `VersionCheckMethod`.
+- The `fetchRequiredVersion` callback should return a version string in one of these formats:
+  - Combined: `'1.8.11+154'`
+  - Version only: `'1.8.11'`
+  - Build only: `'154'`
+- The `VersionCheckMethod` enum determines how versions are compared (see "Version Checking Methods" section above).
 - When creating your iOS app in [App Store Connect](https://appstoreconnect.apple.com/), copy the app ID and use it as the `iosAppStoreId`, otherwise the force upgrade alert will not show. I recommend storing an `APP_STORE_ID` as an environment variable that is set with `--dart-define` or `--dart-define-from-file` and read with `String.fromEnvironment`.
 - The Play Store URL is automatically generated from the package name (which is retrieved with the [package_info_plus](https://pub.dev/packages/package_info_plus) package)
 - If you want to make the update optional, pass `allowCancel: true` to the `ForceUpdateWidget` and use it to add a cancel button to the alert dialog. This will make the alert dismissable, but the prompt will still show on the next app start.
@@ -138,7 +278,7 @@ Then, the update alert will show if **all** these conditions are true:
 
 - the app is running on iOS or Android (web and desktop are **not** supported)
 - the `requiredVersion` is fetched successfully
-- the `requiredVersion` is greater than the `currentVersion`
+- the current version is less than the required version (based on the `VersionCheckMethod`)
 - (iOS only) the `iosAppStoreId` is a non-empty string
 
 If the user clicks on "Update Now" and lands on the app store page but does **not** update the app, the force update alert **will show again** when returning to the app.
@@ -166,12 +306,13 @@ ForceUpdateWidget(
       // * Alternatively, you can use Firebase Remote Config
       final client = RemoteConfigGistClient(dio: Dio());
       final remoteConfig = await client.fetchRemoteConfig();
-      return remoteConfig.requiredVersion;
+      return remoteConfig.requiredVersion; // Returns '2.0.0+154'
     },
     // * Example ID from this app: https://fluttertips.dev/
     // * To avoid mistakes, store the ID as an environment variable and
     // * read it with String.fromEnvironment
     iosAppStoreId: '6482293361',
+    versionCheckMethod: VersionCheckMethod.versionFirstThenBuild,
   ),
   allowCancel: false,
   showForceUpdateAlert: (context, allowCancel) => showAlertDialog(
@@ -204,7 +345,7 @@ The `RemoteConfigGistData` class can be used to fetch and parse some JSON in thi
 ```json
 {
   "config" : {
-    "required_version": "2.0.0"
+    "required_version": "2.0.0+154"
   }
 }
 ```
@@ -259,18 +400,58 @@ For more info, see this example app:
 
 The package comes with a sample server-side app that implements a `required_version` endpoint using [Dart Shelf](https://pub.dev/packages/shelf).
 
-This can be used as part of the force update logic in your Flutter apps.
+This can be used as part of the force update logic in your Flutter apps. The endpoint can return the version in any supported format (`'2.0.0'`, `'154'`, or `'2.0.0+154'`).
 
 For more info, see this example app:
 
 - [example_server_dart_shelf](https://github.com/bizz84/force_update_helper/tree/main/example_server_dart_shelf)
 
-## Are contributions welcome?
+## Use Cases
 
-I created this package so I can reuse the force update logic in my own apps.
+### Use Case 1: Build number only (recommended for production)
+If you increment build numbers with every release and want the simplest comparison:
 
-While you're welcome to suggest improvements, I don't want the package to become bloated, and I only plan to make changes that suit my needs.
+```dart
+ForceUpdateClient(
+  fetchRequiredVersion: () => Future.value('154'),
+  iosAppStoreId: 'YOUR_APP_ID',
+  versionCheckMethod: VersionCheckMethod.buildNumberOnly,
+)
+```
 
-If the package doesn't suit your use case, consider forking and maintaining it yourself.
+### Use Case 2: Version name with build number fallback
+For apps that follow semver strictly but also want build number as a tiebreaker:
+
+```dart
+ForceUpdateClient(
+  fetchRequiredVersion: () => Future.value('2.0.0+154'),
+  iosAppStoreId: 'YOUR_APP_ID',
+  versionCheckMethod: VersionCheckMethod.versionFirstThenBuild,
+)
+```
+
+### Use Case 3: Testing with manual version override
+Useful for testing force update logic without publishing to stores:
+
+```dart
+ForceUpdateClient(
+  fetchRequiredVersion: () => Future.value('999.0.0+999'),
+  iosAppStoreId: 'YOUR_APP_ID',
+  currentVersion: '1.0.0+1', // Override current version for testing
+  versionCheckMethod: VersionCheckMethod.versionFirstThenBuild,
+)
+```
+
+## About This Fork
+
+This is a community-maintained fork of the original [force_update_helper](https://github.com/bizz84/force_update_helper) package by [@biz84](https://twitter.com/biz84), with additional features for flexible version checking.
+
+**Contributions are welcome!** Feel free to:
+- Report issues
+- Submit pull requests
+- Suggest new features
+- Improve documentation
+
+Please note that this is not the official package. For the original implementation, visit the [original repository](https://github.com/bizz84/force_update_helper).
 
 ### [LICENSE: MIT](LICENSE)

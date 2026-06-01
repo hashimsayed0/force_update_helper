@@ -85,7 +85,8 @@ class _ForceUpdateWidgetState extends State<ForceUpdateWidget>
     // * delay Navigator initialization
     int attempts = 0;
     const maxAttempts = 100; // Max 5 seconds (100 * 50ms)
-    while (widget.navigatorKey.currentContext == null && attempts < maxAttempts) {
+    while (
+        widget.navigatorKey.currentContext == null && attempts < maxAttempts) {
       await Future.delayed(const Duration(milliseconds: 50));
       attempts++;
     }
