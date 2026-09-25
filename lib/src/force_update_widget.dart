@@ -29,7 +29,10 @@ class ForceUpdateWidget extends StatefulWidget {
 
 class _ForceUpdateWidgetState extends State<ForceUpdateWidget>
     with WidgetsBindingObserver {
-  var _isAlertVisible = false;
+  // * True from the start of a check until its alert is dismissed, so a check
+  // * triggered while another is still fetching (e.g. the initial check and
+  // * an app resume) can't show a second alert on top of the first
+  var _isCheckInProgress = false;
 
   @override
   void initState() {
@@ -56,9 +59,10 @@ class _ForceUpdateWidgetState extends State<ForceUpdateWidget>
   }
 
   Future<void> _checkIfAppUpdateIsNeeded() async {
-    if (_isAlertVisible) {
+    if (_isCheckInProgress) {
       return;
     }
+    _isCheckInProgress = true;
     try {
       final storeUrl = await widget.forceUpdateClient.storeUrl();
       if (storeUrl == null) {
@@ -76,27 +80,25 @@ class _ForceUpdateWidgetState extends State<ForceUpdateWidget>
       } else {
         rethrow;
       }
+    } finally {
+      _isCheckInProgress = false;
     }
   }
 
   Future<void> _triggerForceUpdate(Uri storeUrl) async {
-    // * Wait for Navigator context to be available with condition-based polling
-    // * This ensures the dialog can be shown even when Sentry or other wrappers
-    // * delay Navigator initialization
-    int attempts = 0;
-    const maxAttempts = 100; // Max 5 seconds (100 * 50ms)
-    while (
-        widget.navigatorKey.currentContext == null && attempts < maxAttempts) {
+    // * Wait for the Navigator to be available. It can take a while: a router
+    // * with an async redirect builds no Navigator until the redirect resolves.
+    // * Never fall back to this widget's own context: it sits above the
+    // * Navigator, so showing a dialog from it throws
+    while (widget.navigatorKey.currentContext == null) {
+      if (!mounted) {
+        return;
+      }
       await Future.delayed(const Duration(milliseconds: 50));
-      attempts++;
     }
 
-    final ctx = widget.navigatorKey.currentContext ?? context;
-    // * setState not needed, just keeping track of alert visibility
-    _isAlertVisible = true;
-    final success = await widget.showForceUpdateAlert(ctx, widget.allowCancel);
-    // * setState not needed, just keeping track of alert visibility
-    _isAlertVisible = false;
+    final success = await widget.showForceUpdateAlert(
+        widget.navigatorKey.currentContext!, widget.allowCancel);
     if (success == true) {
       // * open app store page
       await widget.showStoreListing(storeUrl);
